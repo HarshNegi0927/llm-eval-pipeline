@@ -1,0 +1,14 @@
+streamlit
+langchain
+langchain-groq
+langchain-google-genai
+pandas
+numpy
+matplotlib
+seaborn
+plotly
+python-dotenv
+e2b-code-interpreter
+chromadb
+fastapi
+uvicorn
