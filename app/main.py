@@ -18,6 +18,14 @@ st.set_page_config(
 st.title("🤖 Autonomous Data Analysis Agent")
 st.caption("Multi-Agent AI System — EDA + ML + Visualization")
 
+# Initialize session state
+if "query" not in st.session_state:
+    st.session_state.query = ""
+if "last_report" not in st.session_state:
+    st.session_state.last_report = None
+if "last_charts" not in st.session_state:
+    st.session_state.last_charts = []
+
 # Sidebar
 with st.sidebar:
     st.header("📁 Upload Data")
@@ -37,7 +45,8 @@ Orchestrator
 EDA  ML  Viz
     ↓
 Final Report""")
-    # Main area
+
+# Main area
 if df_store["df"] is None:
     st.info("👈 Upload a CSV file to get started")
     st.stop()
@@ -70,24 +79,32 @@ with col3:
 
 query = st.text_area(
     "Or type your question:",
-    value=st.session_state.get("query", ""),
+    value=st.session_state.query,
     height=100,
-    placeholder="e.g. Which factors affect total_price the most?"
+    key="query_input",
+    placeholder="e.g. Which city has highest revenue? What affects total price?"
 )
 
+# Sync session state
+st.session_state.query = query
+
 if st.button("🚀 Run Multi-Agent Analysis", type="primary"):
-    if not query:
+    if not st.session_state.query.strip():
         st.warning("Please enter a question!")
         st.stop()
-    
+
     status_col1, status_col2, status_col3, status_col4 = st.columns(4)
-    
+
     with st.spinner("Multi-Agent Pipeline Running..."):
         with status_col1:
             st.info("🎯 Orchestrator...")
-        
-        report, charts = run_multi_agent(query)
-        
+
+        report, charts = run_multi_agent(st.session_state.query)
+
+        # Save to session
+        st.session_state.last_report = report
+        st.session_state.last_charts = charts
+
         with status_col1:
             st.success("✅ Orchestrator")
         with status_col2:
@@ -96,19 +113,20 @@ if st.button("🚀 Run Multi-Agent Analysis", type="primary"):
             st.success("✅ ML Agent")
         with status_col4:
             st.success("✅ Viz Agent")
-    
+
+    # Clear query after run
+    st.session_state.query = ""
+
+# Show results if available
+if st.session_state.last_report:
     st.divider()
-    
-    # Final Report
     st.subheader("📋 Executive Report")
-    st.markdown(report)
-    
-    # Charts
-    if charts:
+    st.markdown(st.session_state.last_report)
+
+    if st.session_state.last_charts:
         st.divider()
         st.subheader("📊 Generated Visualizations")
-        
         cols = st.columns(2)
-        for i, chart in enumerate(charts):
+        for i, chart in enumerate(st.session_state.last_charts):
             with cols[i % 2]:
                 st.plotly_chart(chart["fig"], use_container_width=True)
