@@ -6,7 +6,7 @@ onward) will call in a loop. The prompt is never hardcoded here — it's
 always passed in as a PromptConfig, which is what makes this testable
 across prompt versions.
 """
-from .llm_client import call_llm_json
+from .llm_client import call_llm_json, call_llm_json_full_async
 from .models import EmailClassificationOutput, PromptConfig
 
 
@@ -33,3 +33,14 @@ def classify_email(
     user_prompt = build_user_prompt(email_text, prompt_config)
     raw_output = call_llm_json(prompt_config.system_prompt, user_prompt)
     return EmailClassificationOutput(**raw_output)
+
+
+async def classify_email_with_metadata_async(email_text: str, prompt_config: PromptConfig):
+    """Instrumented variant used by the eval engine (Phase 3) — returns both
+    the validated output AND the call metadata (latency, tokens) needed for
+    scoring and cost tracking. classify_email() above is untouched and still
+    exactly what Phase 1 built."""
+    user_prompt = build_user_prompt(email_text, prompt_config)
+    call_result = await call_llm_json_full_async(prompt_config.system_prompt, user_prompt)
+    output = EmailClassificationOutput(**call_result.content)
+    return output, call_result
