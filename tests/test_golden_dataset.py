@@ -11,7 +11,7 @@ from src.golden_dataset import load_golden_dataset
 
 def test_dataset_loads_and_has_minimum_size():
     dataset = load_golden_dataset("v1")
-    assert len(dataset.test_cases) >= 50
+    assert len(dataset.test_cases) >= 80
 
 
 def test_all_ids_are_unique():
@@ -36,7 +36,7 @@ def test_edge_cases_exist():
     """The golden dataset must include deliberately hard cases, not just easy ones."""
     dataset = load_golden_dataset("v1")
     difficulty_counts = Counter(tc.difficulty for tc in dataset.test_cases)
-    assert difficulty_counts["edge"] >= 5, "Need more deliberately hard/edge cases"
+    assert difficulty_counts["edge"] >= 10, "Need more deliberately hard/edge cases"
 
 
 def test_every_case_has_a_non_empty_expected_summary():
