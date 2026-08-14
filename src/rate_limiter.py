@@ -1,17 +1,17 @@
 """A rate limiter that respects BOTH requests-per-minute AND
-tokens-per-minute — because a provider's free tier (Groq's included) caps
-on both axes independently, and you can trip either one first.
+tokens-per-minute, and does so SAFELY under concurrency.
 
-An asyncio.Semaphore alone only caps how many calls are in flight at once.
-It says nothing about how many requests or tokens you've fired in the
-trailing 60 seconds, which is what the provider actually measures. This
-class tracks both in a rolling window and blocks new calls until issuing
-one more would stay under both budgets.
+Token cost isn't known until a call completes — so naively checking "is
+recorded usage under budget?" and only recording AFTER the call finishes
+has a race: several concurrent callers can all see the same (stale, lower)
+recorded total, all judge themselves safe, and all fire together, jointly
+overshooting the provider's real limit before any of them has recorded
+anything. This bit a real run at ~5895/6000 tokens used.
 
-Token cost isn't known until AFTER a call completes (that's when the API
-tells you how many tokens it used) — so the usage is: call reserve()
-before making the request, then record(actual_tokens) after, once you have
-the real number from the response.
+The fix: reserve() charges a conservative ESTIMATE against the budget the
+moment it's granted, inside the same lock — so the very next concurrent
+caller sees the updated running total, not the stale one. Once the real
+response comes back, record() trues the estimate up to the actual count.
 """
 from __future__ import annotations
 
@@ -31,7 +31,10 @@ class RateLimiter:
         self._max_tokens = max_tokens_per_minute
         self._window = window_seconds
         self._request_times: deque[float] = deque()
-        self._token_events: deque[tuple[float, int]] = deque()
+        # Each entry is a mutable [timestamp, tokens] pair (not a tuple) so
+        # record() can true up the estimate to the real count in place,
+        # without disturbing its position in the window.
+        self._token_events: deque[list] = deque()
         self._lock = asyncio.Lock()
 
     def _prune(self, now: float) -> None:
@@ -41,9 +44,12 @@ class RateLimiter:
         while self._token_events and self._token_events[0][0] < cutoff:
             self._token_events.popleft()
 
-    async def reserve(self) -> None:
-        """Blocks until one more request would stay under both budgets for
-        the trailing window, then reserves a request slot."""
+    async def reserve(self, estimated_tokens: int) -> list:
+        """Blocks until issuing one more request — counting
+        `estimated_tokens` as a conservative placeholder — would stay under
+        both budgets, then immediately reserves a request slot AND a
+        provisional token slot. Returns the token-event entry; pass it to
+        record() once the real token count is known."""
         while True:
             sleep_for = 0.0
             async with self._lock:
@@ -52,9 +58,14 @@ class RateLimiter:
                 tokens_used = sum(t for _, t in self._token_events)
                 requests_used = len(self._request_times)
 
-                if requests_used < self._max_requests and tokens_used < self._max_tokens:
+                if (
+                    requests_used < self._max_requests
+                    and tokens_used + estimated_tokens <= self._max_tokens
+                ):
                     self._request_times.append(now)
-                    return
+                    entry = [now, estimated_tokens]
+                    self._token_events.append(entry)
+                    return entry
 
                 candidates = []
                 if self._request_times:
@@ -64,8 +75,10 @@ class RateLimiter:
                 sleep_for = max(0.05, min(candidates) if candidates else 0.5)
             await asyncio.sleep(sleep_for)
 
-    async def record(self, tokens_used: int) -> None:
-        """Charges real token usage against the rolling window once a call
-        has completed and the actual count is known."""
+    async def record(self, entry: list, actual_tokens: int) -> None:
+        """Trues up a reservation with the real token count once known.
+        If the call failed and this never gets called, the conservative
+        estimate just ages out of the window on its own — safer than
+        under-counting a call that might have partially consumed quota."""
         async with self._lock:
-            self._token_events.append((time.monotonic(), tokens_used))
+            entry[1] = actual_tokens

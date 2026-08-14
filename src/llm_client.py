@@ -27,6 +27,12 @@ MODEL_NAME = os.environ.get("EVAL_MODEL", "llama-3.1-8b-instant")
 # with higher limits, or need to go lower if you're sharing a key.
 MAX_REQUESTS_PER_MINUTE = int(os.environ.get("MAX_REQUESTS_PER_MINUTE", "28"))
 MAX_TOKENS_PER_MINUTE = int(os.environ.get("MAX_TOKENS_PER_MINUTE", "5500"))
+# Conservative per-call placeholder charged at reserve() time, before the
+# real count is known — see rate_limiter.py for why this matters under
+# concurrency. Observed real calls in this project run ~250-400 tokens;
+# this pads above that on purpose. Overestimating just makes the limiter a
+# bit more cautious; underestimating is what causes overshoot.
+ESTIMATED_TOKENS_PER_CALL = int(os.environ.get("ESTIMATED_TOKENS_PER_CALL", "500"))
 
 _client: Groq | None = None
 _async_client: AsyncGroq | None = None
@@ -106,7 +112,7 @@ async def call_llm_json_full_async(system_prompt: str, user_prompt: str) -> LLMC
     all golden-dataset cases concurrently — the concurrency semaphore in
     eval_engine.py bounds how many calls are in flight, but THIS is what
     actually paces issuance to stay under the provider's limits."""
-    await _rate_limiter.reserve()
+    reservation = await _rate_limiter.reserve(ESTIMATED_TOKENS_PER_CALL)
     start = time.perf_counter()
     response = await _get_async_client().chat.completions.create(
         model=MODEL_NAME,
@@ -122,7 +128,7 @@ async def call_llm_json_full_async(system_prompt: str, user_prompt: str) -> LLMC
     usage = response.usage
     input_tokens = usage.prompt_tokens if usage else 0
     output_tokens = usage.completion_tokens if usage else 0
-    await _rate_limiter.record(input_tokens + output_tokens)
+    await _rate_limiter.record(reservation, input_tokens + output_tokens)
     return LLMCallResult(
         content=content,
         latency_ms=latency_ms,
