@@ -13,14 +13,24 @@ from dotenv import load_dotenv
 from groq import AsyncGroq, Groq
 from pydantic import BaseModel
 
+from .rate_limiter import RateLimiter
+
 load_dotenv()
 
 # Model names on Groq change as they add/retire models — check
 # console.groq.com for what's currently available if this one 404s.
 MODEL_NAME = os.environ.get("EVAL_MODEL", "llama-3.1-8b-instant")
 
+# Groq's free tier caps at 30 requests/minute AND 6,000 tokens/minute per
+# organization — you can trip either one first. Defaults here sit just
+# under both as a safety margin; override in .env if you're on a paid tier
+# with higher limits, or need to go lower if you're sharing a key.
+MAX_REQUESTS_PER_MINUTE = int(os.environ.get("MAX_REQUESTS_PER_MINUTE", "28"))
+MAX_TOKENS_PER_MINUTE = int(os.environ.get("MAX_TOKENS_PER_MINUTE", "5500"))
+
 _client: Groq | None = None
 _async_client: AsyncGroq | None = None
+_rate_limiter = RateLimiter(MAX_REQUESTS_PER_MINUTE, MAX_TOKENS_PER_MINUTE)
 
 
 class LLMCallResult(BaseModel):
@@ -91,11 +101,12 @@ def call_llm_json(system_prompt: str, user_prompt: str) -> dict:
 
 
 async def call_llm_json_full_async(system_prompt: str, user_prompt: str) -> LLMCallResult:
-    """Async call with full metadata. This is what the eval engine (Phase 3)
-    batches across all golden-dataset cases concurrently, instead of
-    awaiting them one at a time — that's the "async batching" the build
-    guide calls for, to keep a run of 80+ cases fast and not run up cost
-    through idle wall-clock time."""
+    """Async call with full metadata, rate-limited against Groq's actual
+    RPM + TPM caps. This is what the eval engine (Phase 3) batches across
+    all golden-dataset cases concurrently — the concurrency semaphore in
+    eval_engine.py bounds how many calls are in flight, but THIS is what
+    actually paces issuance to stay under the provider's limits."""
+    await _rate_limiter.reserve()
     start = time.perf_counter()
     response = await _get_async_client().chat.completions.create(
         model=MODEL_NAME,
@@ -109,10 +120,13 @@ async def call_llm_json_full_async(system_prompt: str, user_prompt: str) -> LLMC
     latency_ms = (time.perf_counter() - start) * 1000
     content = json.loads(response.choices[0].message.content)
     usage = response.usage
+    input_tokens = usage.prompt_tokens if usage else 0
+    output_tokens = usage.completion_tokens if usage else 0
+    await _rate_limiter.record(input_tokens + output_tokens)
     return LLMCallResult(
         content=content,
         latency_ms=latency_ms,
-        input_tokens=usage.prompt_tokens if usage else 0,
-        output_tokens=usage.completion_tokens if usage else 0,
+        input_tokens=input_tokens,
+        output_tokens=output_tokens,
         model=MODEL_NAME,
     )

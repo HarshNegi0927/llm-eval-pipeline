@@ -23,6 +23,12 @@ from src.run_store import get_latest_run, save_run
 
 async def main(prompt_version: str) -> None:
     print(f"Running eval for prompt version '{prompt_version}' against the golden dataset...")
+    print(
+        "Rate-limited to Groq's free tier (30 req/min, 6,000 tokens/min) — "
+        "an 85-case run makes ~170 calls, so this legitimately takes several "
+        "minutes. Progress prints below as each case finishes. Don't Ctrl+C; "
+        "gaps between lines are the rate limiter waiting, not a hang.\n"
+    )
     previous_run = get_latest_run()  # most recent run overall, before this one
 
     run = await run_eval_async(prompt_version)

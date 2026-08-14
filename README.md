@@ -7,7 +7,8 @@ applied to prompts.
 
 ## Status
 - [x] **Phase 1** — LLM feature under test, versioned prompts, typed interface contract
-- [ ] Phase 2 — Golden dataset (50-100 hand-labeled test cases)
+- [x] **Phase 2** — Golden dataset (85 draft test cases — needs your human review, see below)
+- [x] **Phase 3** — Evaluation engine (async batching, multi-dimensional scoring, regression diff, statistical thresholds)
 - [ ] Phase 3 — Evaluation engine (multi-dimensional scoring, regression diff)
 - [ ] Phase 4 — Alerting + HTML diff reports (Slack)
 - [ ] Phase 5 — CI/CD wiring (GitHub Actions)
@@ -57,6 +58,54 @@ pytest -v
 ```bash
 python scripts/run_single_example.py
 ```
+
+## Golden dataset — human review checklist
+`golden_dataset/v1.json` has 85 draft test cases (25 billing, 24 technical,
+21 account, 15 general; 14 of them tagged `"difficulty": "edge"` — sarcasm,
+typos, mixed-language, near-empty input, deliberately ambiguous twins, and
+a few multi-symptom "hard" cases where two things are broken at once). These
+were drafted, not hand-verified — **do this before treating it as ground
+truth**:
+
+```bash
+python scripts/review_dataset.py
+```
+
+Read every case. For any you disagree with, edit `expected_category` /
+`expected_summary` / `difficulty` directly in the JSON. Once you've
+confirmed a case, set `"human_verified": true` on it. Add your own cases
+too — the point of the golden set is that *you* trust every entry in it,
+because Phase 3's regression detection is only as honest as this file.
+
+## Run a real eval (needs a real API key — makes ~170 live API calls)
+```bash
+python scripts/run_eval.py v1
+```
+First run has nothing to diff against and becomes your baseline. Edit
+`prompts/v1.yaml` (or add `prompts/v2.yaml`), run again, and you'll see a
+pass-rate delta and any regressions/improvements vs. the last run.
+
+**This takes several minutes on Groq's free tier — that's expected.**
+Free tier caps at 30 requests/min AND 6,000 tokens/min, and this run makes
+~170 calls. `src/rate_limiter.py` tracks both limits in a rolling window
+and paces calls to stay under them; progress prints as each case finishes,
+so gaps between lines mean the limiter is waiting, not that anything hung.
+On a paid Developer tier, raise `MAX_REQUESTS_PER_MINUTE` /
+`MAX_TOKENS_PER_MINUTE` in `.env` to go faster.
+
+## How a case is scored
+Every case is checked on two dimensions, not just category:
+1. **Category match** — exact, binary.
+2. **Summary quality** — an LLM-as-judge scores the candidate summary
+   against the golden reference summary, 1-5.
+
+A case only **passes** if the category matches AND the judge score is ≥4.
+This is deliberate — a case that gets the category right but produces a
+garbage summary should still count as a failure.
+
+## Regression thresholds
+Comparing a new run to the previous one: pass-rate drop ≥3% is a
+`warning`, ≥8% is `critical` (both configurable in `src/comparison.py`).
 
 ## Design decisions
 - **Prompt as a file, not a string in code.** Every prompt version lives in

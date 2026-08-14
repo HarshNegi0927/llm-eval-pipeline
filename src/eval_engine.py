@@ -74,7 +74,11 @@ class EvalRun(BaseModel):
 
 
 async def _evaluate_one(
-    tc: GoldenTestCase, prompt_config, semaphore: asyncio.Semaphore
+    tc: GoldenTestCase,
+    prompt_config,
+    semaphore: asyncio.Semaphore,
+    progress: dict,
+    total: int,
 ) -> EvalCaseResult:
     async with semaphore:
         try:
@@ -86,7 +90,7 @@ async def _evaluate_one(
             # error) must not take down the whole 85-case run. Record it
             # as a failed case and move on — this is what "graceful
             # degradation" means in an eval pipeline.
-            return EvalCaseResult(
+            result = EvalCaseResult(
                 test_case_id=tc.id,
                 input=tc.input,
                 expected_category=tc.expected_category,
@@ -94,6 +98,9 @@ async def _evaluate_one(
                 difficulty=tc.difficulty,
                 error=str(e),
             )
+            progress["done"] += 1
+            print(f"  [{progress['done']}/{total}] {tc.id} -> ERROR ({e})", flush=True)
+            return result
 
         summary_score: int | None = None
         try:
@@ -107,7 +114,7 @@ async def _evaluate_one(
             # which the `passed` property treats as a fail (conservative).
             summary_score = None
 
-        return EvalCaseResult(
+        result = EvalCaseResult(
             test_case_id=tc.id,
             input=tc.input,
             expected_category=tc.expected_category,
@@ -121,6 +128,10 @@ async def _evaluate_one(
             input_tokens=call_meta.input_tokens,
             output_tokens=call_meta.output_tokens,
         )
+        progress["done"] += 1
+        status = "PASS" if result.passed else "FAIL"
+        print(f"  [{progress['done']}/{total}] {tc.id} -> {status}", flush=True)
+        return result
 
 
 def _build_summary(
@@ -167,12 +178,20 @@ def _build_summary(
 
 async def run_eval_async(prompt_version: str, dataset_version: str = "v1") -> EvalRun:
     """Runs the full golden dataset against one prompt version, with up to
-    MAX_CONCURRENT_REQUESTS cases in flight at once."""
+    MAX_CONCURRENT_REQUESTS cases in flight at once. Actual pace is set by
+    the rate limiter in llm_client.py, not this concurrency cap — on Groq's
+    free tier (30 RPM / 6,000 TPM) an 85-case run legitimately takes several
+    minutes. Progress prints as each case finishes so it never looks stuck."""
     prompt_config = load_prompt_config(prompt_version)
     dataset = load_golden_dataset(dataset_version)
     semaphore = asyncio.Semaphore(MAX_CONCURRENT_REQUESTS)
+    total = len(dataset.test_cases)
+    progress = {"done": 0}
 
-    tasks = [_evaluate_one(tc, prompt_config, semaphore) for tc in dataset.test_cases]
+    tasks = [
+        _evaluate_one(tc, prompt_config, semaphore, progress, total)
+        for tc in dataset.test_cases
+    ]
     results = await asyncio.gather(*tasks)
 
     summary = _build_summary(list(results), prompt_version, dataset_version)
