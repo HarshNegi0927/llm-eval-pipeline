@@ -10,6 +10,7 @@ applied to prompts.
 - [x] **Phase 2** — Golden dataset (85 draft test cases — needs your human review, see below)
 - [x] **Phase 3** — Evaluation engine (async batching, multi-dimensional scoring, regression diff, statistical thresholds)
 - [x] **Phase 4** — Alerting + HTML diff reports (Slack, drift detection)
+- [x] **Phase 5** — CI/CD wiring (GitHub Actions, Docker)
 - [ ] Phase 3 — Evaluation engine (multi-dimensional scoring, regression diff)
 - [ ] Phase 4 — Alerting + HTML diff reports (Slack)
 - [ ] Phase 5 — CI/CD wiring (GitHub Actions)
@@ -120,6 +121,43 @@ Every `scripts/run_eval.py` run now also:
 - Sends a Slack alert if `SLACK_WEBHOOK_URL` is set in `.env` (get one at
   https://api.slack.com/messaging/webhooks). Leave it blank to skip
   Slack — the pipeline works fully without it.
+
+## CI/CD — GitHub Actions
+`.github/workflows/eval.yml` triggers on every PR that touches `prompts/**`:
+1. Detects which prompt version file(s) changed (`src/git_utils.py`, diffed
+   against the PR's base branch).
+2. Runs the full eval for each changed version (`scripts/ci_run_eval.py`),
+   comparing each against the latest saved run.
+3. Posts a comment on the PR with pass rate, category accuracy, and any
+   regressions/improvements.
+4. **Fails the check (blocking merge, if set as a required check) if any
+   run comes back CRITICAL.**
+5. Uploads the run JSON + HTML report as workflow artifacts.
+
+**Required setup** — add these as repository secrets (Settings → Secrets
+and variables → Actions → New repository secret):
+- `GROQ_API_KEY`
+- `SLACK_WEBHOOK_URL` (optional — leave unset to skip Slack from CI too)
+
+**Why `eval_runs/` and `reports/` are committed to git, not ignored:**
+CI runs in a fresh checkout every time — it has no memory of past runs
+except what's actually in the repo. `get_latest_run()` reads from
+`eval_runs/*.json`, so if that folder isn't committed, every CI run would
+have nothing to diff against and "baseline" would never advance. Commit
+your local eval runs (especially after a meaningful one, like the v1→v2
+comparison from Phase 3) so CI compares against real history, not nothing.
+
+**To test the workflow:** push a new prompt version (e.g. `prompts/v3.yaml`)
+on a branch, open a PR against `main`, and check the Actions tab + the PR's
+comments.
+
+## Docker
+```bash
+docker build -t eval-pipeline .
+docker run --rm -e GROQ_API_KEY=your_key_here eval-pipeline v2
+```
+The container's default command runs `v1`; pass a different version as the
+final argument, as shown above.
 
 ## Design decisions
 - **Prompt as a file, not a string in code.** Every prompt version lives in

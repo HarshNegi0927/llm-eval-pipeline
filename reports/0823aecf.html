@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Eval report — 0823aecf</title>
+<style>
+  body { font-family: -apple-system, Segoe UI, Roboto, sans-serif; background:#f9fafb; color:#111827; margin:0; padding:32px; }
+  .container { max-width: 900px; margin: 0 auto; }
+  h1 { font-size: 20px; margin-bottom:4px; }
+  .meta { color:#6b7280; font-size:13px; margin-bottom:24px; }
+  .card { background:#fff; border:1px solid #e5e7eb; border-radius:10px; padding:20px; margin-bottom:20px; }
+  .scorecard { display:flex; gap:32px; align-items:center; flex-wrap:wrap; }
+  .big-number { font-size:42px; font-weight:700; }
+  .big-label { color:#6b7280; font-size:13px; }
+  .cat-breakdown { flex:1; min-width:220px; }
+  .cat-row { display:flex; align-items:center; gap:8px; margin-bottom:6px; font-size:13px; }
+  .cat-name { width:80px; text-transform:capitalize; }
+  .bar-track { flex:1; background:#e5e7eb; border-radius:4px; height:8px; overflow:hidden; }
+  .bar-fill { background:#4f46e5; height:100%; }
+  .cat-pct { width:48px; text-align:right; color:#6b7280; }
+  .mini-stats { display:flex; gap:24px; flex-wrap:wrap; }
+  .mini-stats > div { display:flex; flex-direction:column; }
+  .mini-label { color:#6b7280; font-size:11px; }
+  .mini-value { font-size:15px; font-weight:600; }
+  .severity-badge { display:inline-block; color:#fff; font-weight:700; font-size:12px; padding:4px 10px; border-radius:6px; margin-bottom:8px; }
+  table.diff-table { width:100%; border-collapse:collapse; font-size:13px; margin-bottom:16px; }
+  table.diff-table th, table.diff-table td { text-align:left; padding:6px 8px; border-bottom:1px solid #f0f0f0; }
+  table.diff-table th { color:#6b7280; font-weight:600; font-size:11px; text-transform:uppercase; }
+  .muted { color:#9ca3af; font-size:13px; }
+  code { background:#f3f4f6; padding:1px 5px; border-radius:4px; }
+</style>
+</head>
+<body>
+<div class="container">
+  <h1>Eval Report — v2</h1>
+  <div class="meta">run 0823aecf &middot; llama-3.1-8b-instant &middot; 2026-08-16T06:58:36.161566+00:00 &middot; dataset v1</div>
+
+  <div class="card">
+    <div class="scorecard">
+      <div class="big-stat">
+        <div class="big-number">90.6%</div>
+        <div class="big-label">77/85 passed</div>
+      </div>
+      <div class="cat-breakdown"><div class="cat-row"><span class="cat-name">account</span><div class="bar-track"><div class="bar-fill" style="width:100%"></div></div><span class="cat-pct">100.0%</span></div><div class="cat-row"><span class="cat-name">billing</span><div class="bar-track"><div class="bar-fill" style="width:84%"></div></div><span class="cat-pct">84.0%</span></div><div class="cat-row"><span class="cat-name">general</span><div class="bar-track"><div class="bar-fill" style="width:93%"></div></div><span class="cat-pct">93.3%</span></div><div class="cat-row"><span class="cat-name">technical</span><div class="bar-track"><div class="bar-fill" style="width:92%"></div></div><span class="cat-pct">91.7%</span></div></div>
+      <div class="mini-stats">
+        <div><span class="mini-label">Avg summary score</span><span class="mini-value">4.06/5</span></div>
+        <div><span class="mini-label">Avg latency</span><span class="mini-value">473ms</span></div>
+        <div><span class="mini-label">Tokens</span><span class="mini-value">66593 in / 2562 out</span></div>
+        <div><span class="mini-label">Errors</span><span class="mini-value">0</span></div>
+      </div>
+    </div>
+    </div>
+
+  <div class="card">
+    <div class="severity-badge" style="background:#16a34a">OK</div>
+    <p>vs run <code>b086339c</code> (v2)
+       — pass rate +0.0 pts</p>
+    <p class='muted'>No regressions.</p>
+    
+    </div>
+
+  
+
+  <div class="card">
+    <h3 style="margin-top:0">Pass rate trend</h3>
+    
+    <svg viewBox="0 0 700 130" width="100%" height="130">
+      <polyline points="24.0,106.0 241.3,46.2 458.7,31.7 676.0,31.7" fill="none" stroke="#4f46e5" stroke-width="2" />
+      <circle cx="24.0" cy="106.0" r="4" fill="#4f46e5" /><circle cx="241.3" cy="46.2" r="4" fill="#4f46e5" /><circle cx="458.7" cy="31.7" r="4" fill="#4f46e5" /><circle cx="676.0" cy="31.7" r="4" fill="#4f46e5" />
+      <text x="24.0" y="126" font-size="10" text-anchor="middle" fill="#6b7280">v1</text><text x="241.3" y="126" font-size="10" text-anchor="middle" fill="#6b7280">v1</text><text x="458.7" y="126" font-size="10" text-anchor="middle" fill="#6b7280">v2</text><text x="676.0" y="126" font-size="10" text-anchor="middle" fill="#6b7280">v2</text>
+    </svg>
+    
+  </div>
+</div>
+</body>
+</html>

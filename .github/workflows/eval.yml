@@ -1,0 +1,65 @@
+name: Eval Pipeline
+
+on:
+  pull_request:
+    paths:
+      - "prompts/**"
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  eval:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # full history — needed to diff against the base branch
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Detect changed prompt versions
+        id: detect
+        run: |
+          VERSIONS=$(python scripts/detect_changed_prompts.py "origin/${{ github.base_ref }}")
+          echo "versions=$VERSIONS" >> "$GITHUB_OUTPUT"
+          echo "Changed prompt versions: $VERSIONS"
+
+      - name: Run eval on changed prompts
+        env:
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+        run: python scripts/ci_run_eval.py ${{ steps.detect.outputs.versions }}
+
+      - name: Upload eval runs and reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: eval-artifacts
+          path: |
+            eval_runs/*.json
+            reports/*.html
+
+      - name: Post PR comment
+        if: always()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const body = fs.existsSync('ci_summary.md')
+              ? fs.readFileSync('ci_summary.md', 'utf8')
+              : 'No eval summary was generated — check the workflow logs.';
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: `## 🧪 Eval Pipeline Results\n\n${body}`
+            });
