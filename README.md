@@ -9,6 +9,7 @@ applied to prompts.
 - [x] **Phase 1** — LLM feature under test, versioned prompts, typed interface contract
 - [x] **Phase 2** — Golden dataset (85 draft test cases — needs your human review, see below)
 - [x] **Phase 3** — Evaluation engine (async batching, multi-dimensional scoring, regression diff, statistical thresholds)
+- [x] **Phase 4** — Alerting + HTML diff reports (Slack, drift detection)
 - [ ] Phase 3 — Evaluation engine (multi-dimensional scoring, regression diff)
 - [ ] Phase 4 — Alerting + HTML diff reports (Slack)
 - [ ] Phase 5 — CI/CD wiring (GitHub Actions)
@@ -106,6 +107,19 @@ garbage summary should still count as a failure.
 ## Regression thresholds
 Comparing a new run to the previous one: pass-rate drop ≥3% is a
 `warning`, ≥8% is `critical` (both configurable in `src/comparison.py`).
+
+## HTML reports + Slack alerts + drift detection
+Every `scripts/run_eval.py` run now also:
+- Writes a self-contained HTML report to `reports/<run_id>.html` — scorecard,
+  regression/improvement tables, and a pass-rate trend chart across all
+  saved runs. Opens by double-clicking, no server needed.
+- Checks for **slow drift**: compares the trailing 7-run average pass rate
+  against the previous 7-run average, independent of any single run's diff.
+  Needs 14+ saved runs before it can fire — with only 2 runs so far it'll
+  stay silent, and that's expected, not broken.
+- Sends a Slack alert if `SLACK_WEBHOOK_URL` is set in `.env` (get one at
+  https://api.slack.com/messaging/webhooks). Leave it blank to skip
+  Slack — the pipeline works fully without it.
 
 ## Design decisions
 - **Prompt as a file, not a string in code.** Every prompt version lives in

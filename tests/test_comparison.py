@@ -1,7 +1,7 @@
 """Tests for comparison.py — pure logic, no LLM calls involved at all.
 Builds fake EvalRun objects directly to test diffing and threshold math.
 """
-from src.comparison import compare_runs
+from src.comparison import check_drift, compare_runs
 from src.eval_engine import EvalCaseResult, EvalRun, EvalRunSummary
 
 
@@ -116,3 +116,59 @@ def test_severity_is_ok_below_3_percent_drop():
     diff = compare_runs(_run("run_a", baseline_results), _run("run_b", new_results))
 
     assert diff.severity == "ok"
+
+
+def _run_with_pass_rate(run_id, pass_rate):
+    """Minimal fake run carrying just a pass_rate — enough for drift math,
+    which only reads summary.pass_rate."""
+    return EvalRun(
+        summary=EvalRunSummary(
+            run_id=run_id,
+            prompt_version="v1",
+            dataset_version="v1",
+            model="test-model",
+            timestamp="2026-08-15T00:00:00Z",
+            total_cases=100,
+            passed=int(pass_rate * 100),
+            pass_rate=pass_rate,
+            category_accuracy={},
+            avg_summary_score=4.0,
+            avg_latency_ms=100.0,
+            total_input_tokens=0,
+            total_output_tokens=0,
+            error_count=0,
+        ),
+        results=[],
+    )
+
+
+def test_check_drift_returns_none_with_insufficient_history():
+    history = [_run_with_pass_rate(f"run_{i}", 0.9) for i in range(5)]  # < 2*window(7)
+    assert check_drift(history, window=7) is None
+
+
+def test_check_drift_returns_none_when_pass_rate_is_stable():
+    history = [_run_with_pass_rate(f"run_{i}", 0.90) for i in range(14)]
+    assert check_drift(history, window=7, drift_threshold=0.05) is None
+
+
+def test_check_drift_detects_a_slow_decline():
+    # First 7 runs at 90%, next 7 runs gradually decline to ~80% average —
+    # no single-run diff would necessarily trip an 8% CRITICAL threshold,
+    # but the trailing 7-run average has clearly slid.
+    prior = [_run_with_pass_rate(f"run_{i}", 0.90) for i in range(7)]
+    recent = [_run_with_pass_rate(f"run_{i+7}", 0.80) for i in range(7)]
+    history = prior + recent
+
+    warning = check_drift(history, window=7, drift_threshold=0.05)
+
+    assert warning is not None
+    assert "drift" in warning.lower()
+
+
+def test_check_drift_ignores_improvement():
+    prior = [_run_with_pass_rate(f"run_{i}", 0.70) for i in range(7)]
+    recent = [_run_with_pass_rate(f"run_{i+7}", 0.90) for i in range(7)]
+    history = prior + recent
+
+    assert check_drift(history, window=7, drift_threshold=0.05) is None

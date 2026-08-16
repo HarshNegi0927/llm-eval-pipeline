@@ -102,3 +102,35 @@ def compare_runs(baseline: EvalRun, new: EvalRun) -> ComparisonResult:
         improvements=improvements,
         severity=severity,
     )
+
+
+def check_drift(
+    history: list[EvalRun], window: int = 7, drift_threshold: float = 0.05
+) -> str | None:
+    """Beyond per-run diffs, catches SLOW degradation that no single run's
+    comparison would flag: if the trailing `window`-run average pass rate
+    has fallen more than `drift_threshold` below the *previous*
+    `window`-run average, that's drift — each individual step might be too
+    small to trip WARNING_THRESHOLD on its own, but the cumulative slide
+    is real. `history` must be ordered oldest-first (as run_store.list_runs
+    returns it). Returns a human-readable warning, or None if there isn't
+    enough history yet or no drift is detected.
+    """
+    if len(history) < window * 2:
+        return None  # need two full windows to compare
+
+    recent_window = history[-window:]
+    prior_window = history[-window * 2 : -window]
+
+    recent_avg = sum(r.summary.pass_rate for r in recent_window) / window
+    prior_avg = sum(r.summary.pass_rate for r in prior_window) / window
+
+    drop = prior_avg - recent_avg
+    if drop >= drift_threshold:
+        return (
+            f"Slow drift detected: the last {window}-run average pass rate "
+            f"({recent_avg*100:.1f}%) is {drop*100:.1f} points below the "
+            f"previous {window}-run average ({prior_avg*100:.1f}%), even "
+            f"though no single run triggered a regression alert."
+        )
+    return None
