@@ -5,16 +5,28 @@ dataset on every prompt change, catches quality regressions before they ship,
 and alerts the team — the same discipline unit tests bring to regular code,
 applied to prompts.
 
+## Results (latest recorded run)
+
+| Metric | Value |
+|---|---|
+| Pass rate | **90.6%** (77/85 cases) |
+| Avg summary quality (LLM-as-judge) | 4.06 / 5 |
+| Avg latency | 473 ms |
+| Errors | 0 |
+
+Category breakdown: account 100% · general 93.3% · technical 91.7% · billing 84%
+
+Run `0823aecf`, prompt `v2`, `llama-3.1-8b-instant` via Groq — flat vs. the
+previous `v2` run, no regressions. Three prompt versions (`v1` → `v3`) have
+been iterated on so far, with 4 recorded eval runs in `eval_runs/` and a full
+HTML report in `reports/`.
+
 ## Status
 - [x] **Phase 1** — LLM feature under test, versioned prompts, typed interface contract
-- [x] **Phase 2** — Golden dataset (85 draft test cases — needs your human review, see below)
+- [x] **Phase 2** — Golden dataset (85 cases — drafted, pending human review, see below)
 - [x] **Phase 3** — Evaluation engine (async batching, multi-dimensional scoring, regression diff, statistical thresholds)
 - [x] **Phase 4** — Alerting + HTML diff reports (Slack, drift detection)
 - [x] **Phase 5** — CI/CD wiring (GitHub Actions, Docker)
-- [ ] Phase 3 — Evaluation engine (multi-dimensional scoring, regression diff)
-- [ ] Phase 4 — Alerting + HTML diff reports (Slack)
-- [ ] Phase 5 — CI/CD wiring (GitHub Actions)
-- [ ] Phase 6 — Docker + demo polish
 
 ## The feature under test
 A customer support email classifier: reads one email, returns a category
@@ -25,17 +37,39 @@ it's the eval infrastructure wrapped around it.
 ## Project structure
 ```
 llm-eval-pipeline/
-├── prompts/            # versioned prompt YAML files — the "code" under CI
-│   └── v1.yaml
+├── .github/workflows/
+│   └── eval.yml               # CI: runs eval on every prompt-changing PR
+├── prompts/                   # versioned prompt YAML — the "code" under CI
+│   ├── v1.yaml
+│   ├── v2.yaml
+│   └── v3.yaml
+├── golden_dataset/
+│   └── v1.json                 # 85 test cases across 4 categories
+├── eval_runs/                  # committed run history — CI diffs against this
+├── reports/                    # self-contained HTML report per run
 ├── src/
-│   ├── models.py        # Pydantic interface contract (input/output types)
-│   ├── prompt_loader.py # loads a PromptConfig from /prompts
-│   ├── llm_client.py     # Groq API wrapper — only file that touches the SDK
-│   └── classifier.py     # the feature under test
-├── tests/
-│   └── test_classifier.py  # mocked-LLM unit tests
+│   ├── models.py                # Pydantic interface contract (input/output types)
+│   ├── prompt_loader.py         # loads a PromptConfig from /prompts
+│   ├── llm_client.py            # Groq API wrapper — only file that touches the SDK
+│   ├── classifier.py            # the feature under test
+│   ├── golden_dataset.py        # loads/validates the golden dataset
+│   ├── judge.py                  # LLM-as-judge summary scoring
+│   ├── eval_engine.py            # async batch runner, scoring orchestration
+│   ├── comparison.py              # regression diff + statistical thresholds
+│   ├── rate_limiter.py            # dual rolling-window limiter (req/min + tokens/min)
+│   ├── report.py                   # HTML report generation
+│   ├── slack_alert.py              # Slack webhook alerting
+│   ├── run_store.py                # reads/writes eval_runs/*.json
+│   └── git_utils.py                # diffs changed prompt files against a base branch
 ├── scripts/
-│   └── run_single_example.py  # manual smoke test with a real API key
+│   ├── run_single_example.py     # manual smoke test with a real API key
+│   ├── review_dataset.py          # interactive golden-dataset review
+│   ├── run_eval.py                 # full local eval run
+│   ├── ci_run_eval.py              # eval entrypoint used by GitHub Actions
+│   ├── detect_changed_prompts.py   # diffs prompts/ against a base branch
+│   └── show_failures.py             # prints failing cases from a saved run
+├── tests/                      # 8 files, mocked-LLM unit tests
+├── Dockerfile
 ├── requirements.txt
 ├── pytest.ini
 └── .env.example
@@ -77,14 +111,14 @@ Read every case. For any you disagree with, edit `expected_category` /
 `expected_summary` / `difficulty` directly in the JSON. Once you've
 confirmed a case, set `"human_verified": true` on it. Add your own cases
 too — the point of the golden set is that *you* trust every entry in it,
-because Phase 3's regression detection is only as honest as this file.
+because the regression detection is only as honest as this file.
 
 ## Run a real eval (needs a real API key — makes ~170 live API calls)
 ```bash
 python scripts/run_eval.py v1
 ```
 First run has nothing to diff against and becomes your baseline. Edit
-`prompts/v1.yaml` (or add `prompts/v2.yaml`), run again, and you'll see a
+`prompts/v1.yaml` (or add a new version), run again, and you'll see a
 pass-rate delta and any regressions/improvements vs. the last run.
 
 **This takes several minutes on Groq's free tier — that's expected.**
@@ -110,14 +144,14 @@ Comparing a new run to the previous one: pass-rate drop ≥3% is a
 `warning`, ≥8% is `critical` (both configurable in `src/comparison.py`).
 
 ## HTML reports + Slack alerts + drift detection
-Every `scripts/run_eval.py` run now also:
+Every `scripts/run_eval.py` run also:
 - Writes a self-contained HTML report to `reports/<run_id>.html` — scorecard,
   regression/improvement tables, and a pass-rate trend chart across all
   saved runs. Opens by double-clicking, no server needed.
 - Checks for **slow drift**: compares the trailing 7-run average pass rate
   against the previous 7-run average, independent of any single run's diff.
-  Needs 14+ saved runs before it can fire — with only 2 runs so far it'll
-  stay silent, and that's expected, not broken.
+  Needs 14+ saved runs before it can fire — with only a handful of runs so
+  far it'll stay silent, and that's expected, not broken.
 - Sends a Slack alert if `SLACK_WEBHOOK_URL` is set in `.env` (get one at
   https://api.slack.com/messaging/webhooks). Leave it blank to skip
   Slack — the pipeline works fully without it.
@@ -144,12 +178,11 @@ CI runs in a fresh checkout every time — it has no memory of past runs
 except what's actually in the repo. `get_latest_run()` reads from
 `eval_runs/*.json`, so if that folder isn't committed, every CI run would
 have nothing to diff against and "baseline" would never advance. Commit
-your local eval runs (especially after a meaningful one, like the v1→v2
-comparison from Phase 3) so CI compares against real history, not nothing.
+your local eval runs (especially after a meaningful one) so CI compares
+against real history, not nothing.
 
-**To test the workflow:** push a new prompt version (e.g. `prompts/v3.yaml`)
-on a branch, open a PR against `main`, and check the Actions tab + the PR's
-comments.
+**To test the workflow:** push a new prompt version on a branch, open a PR
+against `main`, and check the Actions tab + the PR's comments.
 
 ## Docker
 ```bash
@@ -162,7 +195,7 @@ final argument, as shown above.
 ## Design decisions
 - **Prompt as a file, not a string in code.** Every prompt version lives in
   `/prompts/<version_id>.yaml` with its own timestamp and few-shot examples.
-  This is what lets Phase 5's CI trigger watch "did `/prompts` change?" the
+  This is what lets the CI trigger watch "did `/prompts` change?" the
   same way it'd watch any source file.
 - **Groq over OpenAI.** Free tier, fast inference, OpenAI-compatible-style
   JSON mode. Swappable later — `llm_client.py` is the only file that would
